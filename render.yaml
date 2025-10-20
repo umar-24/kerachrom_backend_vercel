@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: kerachrom-backend
+    env: node
+    region: oregon # or Frankfurt (for EU)
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false

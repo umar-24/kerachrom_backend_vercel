@@ -1,0 +1,44 @@
+{
+  "name": "app-kerachrom-backend",
+  "version": "1.0.0",
+  "description": "Backend of KeraChrom app with image enhancement support",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon index.js",
+    "dev": "nodemon index.js",
+    "prod": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "keywords": [
+    "kerachrom",
+    "backend",
+    "api",
+    "image-enhancement",
+    "nodejs",
+    "express"
+  ],
+  "dependencies": {
+    "@paypal/checkout-server-sdk": "^1.0.3",
+    "axios": "^1.12.2",
+    "bcryptjs": "^2.4.3",
+    "braintree": "^3.32.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.0",
+    "morgan": "^1.10.1",
+    "multer": "^1.4.5-lts.2",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^6.10.1",
+    "nodemon": "^3.1.9",
+    "uuid": "^13.0.0",
+    "webidl2js": "^18.0.0",
+    "whatwg-url": "^14.2.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
