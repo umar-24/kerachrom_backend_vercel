@@ -335,161 +335,391 @@ router.post('/refund', async (req, res) => {
 // });
 
 
+
+
+
+
+
+
 // IAP Purchase Endpoint (iOS & Android) - FIXED VERSION
-// ✅ SECURE IAP Purchase Endpoint - MUST VERIFY RECEIPT
+// // ✅ SECURE IAP Purchase Endpoint - MUST VERIFY RECEIPT
+// router.post('/iap-purchase', async (req, res) => {
+//   try {
+//     const { userId, purchaseId, productId, credits, platform, transactionDate, receiptData } = req.body;
+
+//     console.log('📱 IAP Purchase Request:', { 
+//       userId, 
+//       purchaseId: purchaseId || 'PENDING', 
+//       productId, 
+//       credits, 
+//       platform,
+//       hasReceipt: !!receiptData 
+//     });
+
+//     // ✅ Validation
+//     if (!userId || !productId || !credits) {
+//       console.error('❌ Missing required fields:', { userId, productId, credits });
+//       return res.status(400).json({ 
+//         error: 'Missing required fields (userId, productId, or credits)',
+//         received: { userId, productId, credits }
+//       });
+//     }
+
+//     // ✅ CRITICAL: iOS MUST have receipt data
+//     if (platform === 'ios' && !receiptData) {
+//       console.error('❌ iOS purchase missing receipt data');
+//       return res.status(400).json({ 
+//         error: 'Receipt verification required for iOS purchases',
+//         message: 'No receipt data provided'
+//       });
+//     }
+
+//     // ✅ Generate fallback purchaseId
+//     const finalPurchaseId = purchaseId || `${productId}-${userId}-${Date.now()}`;
+//     console.log('🔑 Using Purchase ID:', finalPurchaseId);
+
+//     // ✅ Check for duplicate
+//     const existingPurchase = await CreditTransaction.findOne({ 
+//       $or: [
+//         { purchaseId: finalPurchaseId },
+//         { 
+//           userId: userId,
+//           productId: productId,
+//           timestamp: { 
+//             $gte: new Date(Date.now() - 5 * 60 * 1000) 
+//           }
+//         }
+//       ]
+//     });
+
+//     if (existingPurchase) {
+//       console.log(`⚠️ Duplicate purchase detected: ${finalPurchaseId}`);
+//       const user = await User.findById(userId);
+//       return res.status(200).json({ 
+//         success: true,
+//         message: 'Purchase already processed',
+//         newBalance: user.credits,
+//         credits: user.credits,
+//         isDuplicate: true
+//       });
+//     }
+
+//     // ✅ MANDATORY RECEIPT VERIFICATION FOR iOS
+//     let receiptVerified = false;
+//     let receiptError = null;
+
+//     if (platform === 'ios') {
+//       try {
+//         console.log('🔍 Verifying iOS receipt (MANDATORY)...');
+        
+//         // Try Sandbox first (for TestFlight)
+//         let verificationResponse = await axios.post(
+//           'https://sandbox.itunes.apple.com/verifyReceipt', 
+//           {
+//             'receipt-data': receiptData,
+//             'password': '9e372c5bdb294b459391436dcda62329'
+//           },
+//           {
+//             timeout: 10000,
+//             headers: { 'Content-Type': 'application/json' }
+//           }
+//         );
+
+//         let verificationData = verificationResponse.data;
+//         console.log(`📋 Apple Response Status: ${verificationData.status}`);
+
+//         // Handle status 21007 (sandbox receipt sent to production)
+//         if (verificationData.status === 21007) {
+//           console.log('🔄 Sandbox receipt detected, trying production URL...');
+//           verificationResponse = await axios.post(
+//             'https://buy.itunes.apple.com/verifyReceipt',
+//             {
+//               'receipt-data': receiptData,
+//               'password': '9e372c5bdb294b459391436dcda62329'
+//             },
+//             { timeout: 10000 }
+//           );
+//           verificationData = verificationResponse.data;
+//           console.log(`📋 Production Response Status: ${verificationData.status}`);
+//         }
+
+//         // Check verification status
+//         if (verificationData.status === 0) {
+//           receiptVerified = true;
+//           console.log('✅ iOS receipt VERIFIED successfully');
+          
+//           // Additional validation: check product ID matches
+//           const receipt = verificationData.receipt;
+//           if (receipt && receipt.in_app && receipt.in_app.length > 0) {
+//             const latestPurchase = receipt.in_app[receipt.in_app.length - 1];
+//             if (latestPurchase.product_id !== productId) {
+//               console.error(`❌ Product ID mismatch: Expected ${productId}, got ${latestPurchase.product_id}`);
+//               return res.status(400).json({
+//                 error: 'Receipt verification failed',
+//                 message: 'Product ID does not match receipt'
+//               });
+//             }
+//           }
+          
+//         } else if (verificationData.status === 21002) {
+//           receiptError = 'Invalid receipt data';
+//         } else if (verificationData.status === 21003) {
+//           receiptError = 'Receipt authentication failed';
+//         } else if (verificationData.status === 21005) {
+//           receiptError = 'Apple receipt server unavailable';
+//         } else {
+//           receiptError = `Apple verification failed (Status: ${verificationData.status})`;
+//         }
+
+//       } catch (verificationError) {
+//         console.error('❌ Receipt verification error:', verificationError.message);
+//         receiptError = 'Receipt verification network error';
+//       }
+
+//       // ✅ REJECT if receipt not verified
+//       if (!receiptVerified) {
+//         console.error('🚫 RECEIPT VERIFICATION FAILED - BLOCKING PURCHASE');
+//         return res.status(400).json({
+//           error: 'Receipt verification failed',
+//           message: receiptError || 'Unable to verify purchase with Apple',
+//           details: 'Payment was not confirmed by Apple. Please try again or contact support.'
+//         });
+//       }
+//     }
+
+//     // ✅ Only process if receipt verified (iOS) or non-iOS platform
+//     if (platform === 'ios' && !receiptVerified) {
+//       return res.status(400).json({
+//         error: 'Purchase verification required',
+//         message: 'Cannot process unverified purchase'
+//       });
+//     }
+
+//     // ✅ NOW safe to add credits
+//     const user = await User.findById(userId);
+//     if (!user) {
+//       return res.status(404).json({ error: 'User not found' });
+//     }
+
+//     const oldCredits = user.credits || 0;
+//     const creditsToAdd = parseInt(credits);
+//     user.credits = oldCredits + creditsToAdd;
+//     await user.save();
+
+//     // ✅ Save transaction
+//     const transaction = new CreditTransaction({
+//       userId,
+//       purchaseId: finalPurchaseId,
+//       productId,
+//       type: "purchase",
+//       amount: creditsToAdd,
+//       platform: platform || 'ios',
+//       status: 'approved',
+//       timestamp: transactionDate ? new Date(transactionDate) : new Date(),
+//       note: `IAP purchase via ${platform} (${productId}) [Receipt Verified: ${receiptVerified}]`
+//     });
+//     await transaction.save();
+
+//     console.log(`✅ SECURE Purchase Completed: ${finalPurchaseId}`);
+//     console.log(`   User: ${userId}`);
+//     console.log(`   Credits: ${oldCredits} → ${user.credits} (+${creditsToAdd})`);
+//     console.log(`   Receipt Verified: ${receiptVerified}`);
+
+//     res.status(200).json({
+//       success: true,
+//       message: 'Purchase processed successfully',
+//       credits: user.credits,
+//       newBalance: user.credits,
+//       addedCredits: creditsToAdd,
+//       receiptVerified,
+//       transaction: {
+//         id: transaction._id,
+//         purchaseId: finalPurchaseId
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('❌ IAP purchase processing error:', error);
+//     res.status(500).json({ 
+//       error: 'Failed to process purchase',
+//       details: error.message 
+//     });
+//   }
+// });
+
+
+
+// updated IAP Purchase Endpoint (iOS & Android) with mandatory receipt verification for iOS
+
 router.post('/iap-purchase', async (req, res) => {
   try {
     const { userId, purchaseId, productId, credits, platform, transactionDate, receiptData } = req.body;
 
     console.log('📱 IAP Purchase Request:', { 
       userId, 
-      purchaseId: purchaseId || 'PENDING', 
       productId, 
-      credits, 
       platform,
-      hasReceipt: !!receiptData 
+      receiptLength: receiptData?.length || 0 
     });
 
     // ✅ Validation
     if (!userId || !productId || !credits) {
-      console.error('❌ Missing required fields:', { userId, productId, credits });
+      console.error('❌ Missing required fields');
       return res.status(400).json({ 
-        error: 'Missing required fields (userId, productId, or credits)',
-        received: { userId, productId, credits }
+        error: 'Missing required fields'
       });
     }
 
-    // ✅ CRITICAL: iOS MUST have receipt data
+    // ✅ iOS must have receipt
     if (platform === 'ios' && !receiptData) {
       console.error('❌ iOS purchase missing receipt data');
       return res.status(400).json({ 
-        error: 'Receipt verification required for iOS purchases',
-        message: 'No receipt data provided'
+        error: 'No receipt data provided'
       });
     }
 
-    // ✅ Generate fallback purchaseId
-    const finalPurchaseId = purchaseId || `${productId}-${userId}-${Date.now()}`;
-    console.log('🔑 Using Purchase ID:', finalPurchaseId);
-
     // ✅ Check for duplicate
+    const finalPurchaseId = purchaseId || `${productId}-${userId}-${Date.now()}`;
     const existingPurchase = await CreditTransaction.findOne({ 
-      $or: [
-        { purchaseId: finalPurchaseId },
-        { 
-          userId: userId,
-          productId: productId,
-          timestamp: { 
-            $gte: new Date(Date.now() - 5 * 60 * 1000) 
-          }
-        }
-      ]
+      purchaseId: finalPurchaseId 
     });
 
     if (existingPurchase) {
-      console.log(`⚠️ Duplicate purchase detected: ${finalPurchaseId}`);
+      console.log(`⚠️ Duplicate purchase: ${finalPurchaseId}`);
       const user = await User.findById(userId);
       return res.status(200).json({ 
         success: true,
         message: 'Purchase already processed',
-        newBalance: user.credits,
-        credits: user.credits,
-        isDuplicate: true
+        newBalance: user.credits
       });
     }
 
     // ✅ MANDATORY RECEIPT VERIFICATION FOR iOS
     let receiptVerified = false;
     let receiptError = null;
+    let appleStatus = null;
+    let appleEnvironment = null;
 
     if (platform === 'ios') {
       try {
-        console.log('🔍 Verifying iOS receipt (MANDATORY)...');
+        console.log('🔍 Verifying iOS receipt...');
+        console.log('📄 Receipt length:', receiptData.length);
         
-        // Try Sandbox first (for TestFlight)
+        // ✅ FIX 1: Try PRODUCTION first
+        let verificationUrl = 'https://buy.itunes.apple.com/verifyReceipt';
+        let currentAttempt = 'Production';
+        
         let verificationResponse = await axios.post(
-          'https://sandbox.itunes.apple.com/verifyReceipt', 
+          verificationUrl,
           {
             'receipt-data': receiptData,
-            'password': '9e372c5bdb294b459391436dcda62329'
+            'password': '9e372c5bdb294b459391436dcda62329',
+            'exclude-old-transactions': false
           },
           {
-            timeout: 10000,
+            timeout: 15000,
             headers: { 'Content-Type': 'application/json' }
           }
         );
 
         let verificationData = verificationResponse.data;
-        console.log(`📋 Apple Response Status: ${verificationData.status}`);
-
-        // Handle status 21007 (sandbox receipt sent to production)
+        appleStatus = verificationData.status;
+        
+        console.log(`📋 ${currentAttempt} Response Status: ${appleStatus}`);
+        console.log(`📋 Apple Environment: ${verificationData.environment}`);
+        
+        // ✅ FIX 2: Handle sandbox receipt in production
         if (verificationData.status === 21007) {
-          console.log('🔄 Sandbox receipt detected, trying production URL...');
+          console.log('🔄 Sandbox receipt detected, trying sandbox URL...');
+          verificationUrl = 'https://sandbox.itunes.apple.com/verifyReceipt';
+          currentAttempt = 'Sandbox';
+          
           verificationResponse = await axios.post(
-            'https://buy.itunes.apple.com/verifyReceipt',
+            verificationUrl,
             {
               'receipt-data': receiptData,
-              'password': '9e372c5bdb294b459391436dcda62329'
+              'password': '9e372c5bdb294b459391436dcda62329',
+              'exclude-old-transactions': false
             },
-            { timeout: 10000 }
+            { timeout: 15000 }
           );
+          
           verificationData = verificationResponse.data;
-          console.log(`📋 Production Response Status: ${verificationData.status}`);
+          appleStatus = verificationData.status;
+          console.log(`📋 ${currentAttempt} Response Status: ${appleStatus}`);
         }
 
-        // Check verification status
+        // ✅ FIX 3: Check verification status with detailed logging
         if (verificationData.status === 0) {
           receiptVerified = true;
+          appleEnvironment = verificationData.environment;
           console.log('✅ iOS receipt VERIFIED successfully');
+          console.log(`🌐 Environment: ${appleEnvironment}`);
           
-          // Additional validation: check product ID matches
-          const receipt = verificationData.receipt;
-          if (receipt && receipt.in_app && receipt.in_app.length > 0) {
-            const latestPurchase = receipt.in_app[receipt.in_app.length - 1];
-            if (latestPurchase.product_id !== productId) {
-              console.error(`❌ Product ID mismatch: Expected ${productId}, got ${latestPurchase.product_id}`);
-              return res.status(400).json({
-                error: 'Receipt verification failed',
-                message: 'Product ID does not match receipt'
-              });
+          // ✅ Validate product ID match
+          if (verificationData.receipt && verificationData.receipt.in_app) {
+            const purchases = verificationData.receipt.in_app;
+            console.log(`📋 Found ${purchases.length} in-app purchases`);
+            
+            const matchingPurchase = purchases.find(p => p.product_id === productId);
+            if (matchingPurchase) {
+              console.log(`✅ Product ID matches: ${matchingPurchase.product_id}`);
+            } else {
+              console.log(`❌ Product ID mismatch. Expected: ${productId}`);
+              console.log(`❌ Found products: ${purchases.map(p => p.product_id).join(', ')}`);
+              receiptVerified = false;
+              receiptError = `Product ID mismatch. Expected: ${productId}, Found: ${purchases.map(p => p.product_id).join(', ')}`;
             }
+          } else {
+            console.log('❌ No in-app purchases found in receipt');
+            receiptVerified = false;
+            receiptError = 'No purchase data found in receipt';
           }
           
-        } else if (verificationData.status === 21002) {
-          receiptError = 'Invalid receipt data';
-        } else if (verificationData.status === 21003) {
-          receiptError = 'Receipt authentication failed';
-        } else if (verificationData.status === 21005) {
-          receiptError = 'Apple receipt server unavailable';
         } else {
-          receiptError = `Apple verification failed (Status: ${verificationData.status})`;
+          // Handle other status codes
+          receiptError = `Apple verification failed with status: ${verificationData.status}`;
+          console.log(`❌ ${receiptError}`);
+          
+          // Log common status codes for debugging
+          const statusMessages = {
+            21000: 'The request to the App Store was not made using the HTTP POST request method.',
+            21002: 'The data in the receipt-data property was malformed or missing.',
+            21003: 'The receipt could not be authenticated.',
+            21004: 'The shared secret you provided does not match the shared secret on file for your account.',
+            21005: 'The receipt server is not currently available.',
+            21006: 'This receipt is valid but the subscription has expired.',
+            21007: 'This receipt is from the test environment, but it was sent to the production environment for verification.',
+            21008: 'This receipt is from the production environment, but it was sent to the test environment for verification.',
+            21010: 'This receipt could not be authorized.',
+          };
+          
+          if (statusMessages[verificationData.status]) {
+            console.log(`💡 Status ${verificationData.status}: ${statusMessages[verificationData.status]}`);
+          }
         }
 
       } catch (verificationError) {
-        console.error('❌ Receipt verification error:', verificationError.message);
-        receiptError = 'Receipt verification network error';
+        console.error('❌ Receipt verification network error:', verificationError.message);
+        receiptError = `Network error: ${verificationError.message}`;
       }
 
       // ✅ REJECT if receipt not verified
       if (!receiptVerified) {
-        console.error('🚫 RECEIPT VERIFICATION FAILED - BLOCKING PURCHASE');
+        console.error('🚫 RECEIPT VERIFICATION FAILED');
+        console.error('   Apple Status:', appleStatus);
+        console.error('   Error:', receiptError);
+        
         return res.status(400).json({
           error: 'Receipt verification failed',
           message: receiptError || 'Unable to verify purchase with Apple',
-          details: 'Payment was not confirmed by Apple. Please try again or contact support.'
+          appleStatus: appleStatus,
+          environment: appleEnvironment
         });
       }
     }
 
-    // ✅ Only process if receipt verified (iOS) or non-iOS platform
-    if (platform === 'ios' && !receiptVerified) {
-      return res.status(400).json({
-        error: 'Purchase verification required',
-        message: 'Cannot process unverified purchase'
-      });
-    }
-
-    // ✅ NOW safe to add credits
+    // ✅ Process the verified purchase
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -500,7 +730,7 @@ router.post('/iap-purchase', async (req, res) => {
     user.credits = oldCredits + creditsToAdd;
     await user.save();
 
-    // ✅ Save transaction
+    // Save transaction
     const transaction = new CreditTransaction({
       userId,
       purchaseId: finalPurchaseId,
@@ -510,14 +740,15 @@ router.post('/iap-purchase', async (req, res) => {
       platform: platform || 'ios',
       status: 'approved',
       timestamp: transactionDate ? new Date(transactionDate) : new Date(),
-      note: `IAP purchase via ${platform} (${productId}) [Receipt Verified: ${receiptVerified}]`
+      note: `IAP purchase via ${platform} (${productId}) [Apple Status: ${appleStatus}, Env: ${appleEnvironment}]`
     });
     await transaction.save();
 
     console.log(`✅ SECURE Purchase Completed: ${finalPurchaseId}`);
     console.log(`   User: ${userId}`);
     console.log(`   Credits: ${oldCredits} → ${user.credits} (+${creditsToAdd})`);
-    console.log(`   Receipt Verified: ${receiptVerified}`);
+    console.log(`   Apple Status: ${appleStatus}`);
+    console.log(`   Environment: ${appleEnvironment}`);
 
     res.status(200).json({
       success: true,
@@ -526,10 +757,8 @@ router.post('/iap-purchase', async (req, res) => {
       newBalance: user.credits,
       addedCredits: creditsToAdd,
       receiptVerified,
-      transaction: {
-        id: transaction._id,
-        purchaseId: finalPurchaseId
-      }
+      appleStatus,
+      environment: appleEnvironment
     });
 
   } catch (error) {
@@ -540,6 +769,12 @@ router.post('/iap-purchase', async (req, res) => {
     });
   }
 });
+
+
+
+
+
+
 
 // Get user credits
 router.get('/balance/:userId', async (req, res) => {
