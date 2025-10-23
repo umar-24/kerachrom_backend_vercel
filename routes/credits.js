@@ -232,6 +232,74 @@ router.post('/refund', async (req, res) => {
   res.json({ message: 'Credits refunded', newBalance: user.credits });
 });
 
+
+ 
+ router.post('/iap-purchase', async (req, res) => {
+  try {
+    const { userId, purchaseId, productId, credits, platform } = req.body;
+
+    console.log('\n=== 📱 IAP PURCHASE REQUEST ===');
+    console.log('👤 User:', userId);
+    console.log('🎯 Product:', productId);
+    console.log('💳 Purchase ID:', purchaseId);
+    console.log('🪙 Credits:', credits);
+
+    // ✅ Simple validation
+    if (!userId || !purchaseId || !productId || !credits) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // ✅ Check duplicate
+    const existing = await CreditTransaction.findOne({ purchaseId });
+    if (existing) {
+      console.log('⚠️ Duplicate purchase');
+      const user = await User.findById(userId);
+      return res.status(200).json({ 
+        success: true, 
+        credits: user.credits,
+        isDuplicate: true 
+      });
+    }
+
+    // ✅ Update user credits
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const creditsToAdd = parseInt(credits);
+    user.credits = (user.credits || 0) + creditsToAdd;
+    await user.save();
+
+    // ✅ Save transaction
+    const transaction = new CreditTransaction({
+      userId,
+      purchaseId,
+      productId,
+      type: "purchase",
+      amount: creditsToAdd,
+      platform: platform || 'ios',
+      status: 'approved',
+      note: `IAP purchase - ${productId}`
+    });
+    await transaction.save();
+
+    console.log('✅ Credits updated:', user.credits);
+
+    res.status(200).json({
+      success: true,
+      credits: user.credits,
+      newBalance: user.credits,
+      addedCredits: creditsToAdd,
+      message: 'Purchase processed successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ IAP Error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+///
 // IAP Purchase Endpoint (iOS & Android)
 // router.post('/iap-purchase', async (req, res) => {
 //   try {
@@ -872,45 +940,222 @@ router.post('/refund', async (req, res) => {
 
 
 
-router.post('/iap-purchase', async (req, res) => {
-  try {
-    const { userId, purchaseId, productId, credits, platform, transactionDate, receiptData } = req.body;
+// router.post('/iap-purchase', async (req, res) => {
+//   try {
+//     const { userId, purchaseId, productId, credits, platform, transactionDate, receiptData } = req.body;
 
-    console.log('\n=== 📱 iOS IAP PURCHASE REQUEST ===');
-    console.log('🆔 User ID:', userId);
+//     console.log('\n=== 📱 iOS IAP PURCHASE REQUEST ===');
+//     console.log('🆔 User ID:', userId);
+//     console.log('🎯 Product ID:', productId);
+//     console.log('💳 Purchase ID:', purchaseId || 'PENDING');
+//     console.log('🪙 Credits:', credits);
+//     console.log('📄 Receipt Length:', receiptData?.length || 0, 'chars');
+//     console.log('📱 Platform:', platform);
+
+//     // ✅ VALIDATION
+//     if (!userId || !productId || !credits) {
+//       console.error('❌ Missing required fields');
+//       return res.status(400).json({ 
+//         error: 'Missing required fields',
+//         received: { userId: !!userId, productId: !!productId, credits: !!credits }
+//       });
+//     }
+
+//     if (platform === 'ios' && !receiptData) {
+//       console.error('❌ iOS purchase missing receipt');
+//       return res.status(400).json({ 
+//         error: 'Receipt required for iOS purchases'
+//       });
+//     }
+
+//     // ✅ GENERATE FALLBACK PURCHASE ID
+//     const finalPurchaseId = purchaseId || `${productId}-${userId}-${Date.now()}`;
+//     console.log('🔑 Final Purchase ID:', finalPurchaseId);
+
+//     // ✅ CHECK FOR DUPLICATE
+//     const existingPurchase = await CreditTransaction.findOne({ 
+//       purchaseId: finalPurchaseId 
+//     });
+
+//     if (existingPurchase) {
+//       console.log('⚠️ Duplicate purchase:', finalPurchaseId);
+//       const user = await User.findById(userId);
+//       return res.status(200).json({ 
+//         success: true,
+//         message: 'Purchase already processed',
+//         newBalance: user.credits,
+//         credits: user.credits,
+//         isDuplicate: true
+//       });
+//     }
+
+//     // ✅ TEMPORARY BYPASS FOR TESTING - REMOVE IN PRODUCTION
+//     console.log('🔄 TEMPORARY: Bypassing Apple verification for testing');
+//     let receiptVerified = true;
+//     let appleStatus = 0;
+//     let appleEnvironment = 'Production-Bypassed';
+//     let verificationDetails = {
+//       transactionId: finalPurchaseId,
+//       note: 'Temporary bypass for testing'
+//     };
+
+//     // ✅ ORIGINAL VERIFICATION CODE (COMMENTED FOR NOW)
+//     /*
+//     let receiptVerified = false;
+//     let appleStatus = null;
+//     let appleEnvironment = null;
+//     let verificationDetails = null;
+
+//     if (platform === 'ios') {
+//       console.log('\n=== 🔐 APPLE RECEIPT VERIFICATION ===');
+      
+//       try {
+//         // Your original verification code here...
+//         // [Keep your original verification code but commented for now]
+        
+//       } catch (verificationError) {
+//         console.error('❌ Receipt Verification Network Error:', verificationError.message);
+//         receiptVerified = false;
+//       }
+
+//       // ✅ REJECT IF NOT VERIFIED
+//       if (!receiptVerified) {
+//         console.error('🚫 BLOCKING PURCHASE - RECEIPT NOT VERIFIED');
+        
+//         return res.status(400).json({
+//           error: 'Receipt verification failed',
+//           message: 'Could not verify purchase with Apple',
+//           appleStatus: appleStatus,
+//           environment: appleEnvironment,
+//           details: 'Please contact support if you were charged'
+//         });
+//       }
+//     }
+//     */
+
+//     // ✅ CREDIT USER (ONLY IF VERIFIED)
+//     console.log('\n=== 💰 CREDITING USER ===');
+    
+//     const user = await User.findById(userId);
+//     if (!user) {
+//       console.error('❌ User not found:', userId);
+//       return res.status(404).json({ error: 'User not found' });
+//     }
+
+//     const oldCredits = user.credits || 0;
+//     const creditsToAdd = parseInt(credits);
+//     user.credits = oldCredits + creditsToAdd;
+//     await user.save();
+
+//     console.log('✅ Credits Updated:');
+//     console.log(`   Old: ${oldCredits}`);
+//     console.log(`   Added: +${creditsToAdd}`);
+//     console.log(`   New: ${user.credits}`);
+
+//     // ✅ SAVE TRANSACTION
+//     const transaction = new CreditTransaction({
+//       userId,
+//       purchaseId: finalPurchaseId,
+//       productId,
+//       type: "purchase",
+//       amount: creditsToAdd,
+//       platform: platform || 'ios',
+//       status: 'approved',
+//       timestamp: transactionDate ? new Date(transactionDate) : new Date(),
+//       note: `IAP ${platform} (${productId}) [BYPASSED]${verificationDetails ? `, TxID: ${verificationDetails.transactionId}` : ''}`
+//     });
+//     await transaction.save();
+
+//     console.log('✅ Transaction Saved:', transaction._id);
+//     console.log('=== ✅ PURCHASE COMPLETED (BYPASSED) ===\n');
+
+//     res.status(200).json({
+//       success: true,
+//       message: 'Purchase processed successfully (BYPASS MODE)',
+//       credits: user.credits,
+//       newBalance: user.credits,
+//       addedCredits: creditsToAdd,
+//       receiptVerified: true,
+//       appleStatus: 0,
+//       environment: 'Bypassed',
+//       transaction: {
+//         id: transaction._id,
+//         purchaseId: finalPurchaseId
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('\n❌ IAP PURCHASE ERROR:', error.message);
+//     console.error('Stack:', error.stack);
+    
+//     res.status(500).json({ 
+//       error: 'Server error processing purchase',
+//       details: error.message 
+//     });
+//   }
+// });
+
+
+    // Add this new endpoint to your credits.js file
+
+// ✅ NEW ENDPOINT: IAP Purchase with Flutter-side verification
+router.post('/iap-verified', async (req, res) => {
+  try {
+    const { 
+      userId, 
+      purchaseId, 
+      productId, 
+      credits, 
+      platform, 
+      transactionDate,
+      verified,
+      appleStatus,
+      appleEnvironment,
+      transactionId
+    } = req.body;
+
+    console.log('\n=== 📱 VERIFIED IAP PURCHASE REQUEST ===');
+    console.log('👤 User ID:', userId);
     console.log('🎯 Product ID:', productId);
-    console.log('💳 Purchase ID:', purchaseId || 'PENDING');
+    console.log('💳 Purchase ID:', purchaseId);
     console.log('🪙 Credits:', credits);
-    console.log('📄 Receipt Length:', receiptData?.length || 0, 'chars');
     console.log('📱 Platform:', platform);
+    console.log('✅ Verified:', verified);
+    console.log('📊 Apple Status:', appleStatus);
+    console.log('🌍 Environment:', appleEnvironment);
+    console.log('🆔 Transaction ID:', transactionId);
 
     // ✅ VALIDATION
-    if (!userId || !productId || !credits) {
+    if (!userId || !purchaseId || !productId || !credits) {
       console.error('❌ Missing required fields');
       return res.status(400).json({ 
         error: 'Missing required fields',
-        received: { userId: !!userId, productId: !!productId, credits: !!credits }
+        received: { 
+          userId: !!userId, 
+          purchaseId: !!purchaseId, 
+          productId: !!productId, 
+          credits: !!credits 
+        }
       });
     }
 
-    if (platform === 'ios' && !receiptData) {
-      console.error('❌ iOS purchase missing receipt');
-      return res.status(400).json({ 
-        error: 'Receipt required for iOS purchases'
+    // ✅ CHECK VERIFICATION STATUS
+    if (!verified || appleStatus !== 0) {
+      console.error('❌ Purchase not verified by Apple');
+      return res.status(400).json({
+        error: 'Purchase not verified',
+        message: 'Apple receipt verification failed',
+        appleStatus: appleStatus
       });
     }
-
-    // ✅ GENERATE FALLBACK PURCHASE ID
-    const finalPurchaseId = purchaseId || `${productId}-${userId}-${Date.now()}`;
-    console.log('🔑 Final Purchase ID:', finalPurchaseId);
 
     // ✅ CHECK FOR DUPLICATE
     const existingPurchase = await CreditTransaction.findOne({ 
-      purchaseId: finalPurchaseId 
+      purchaseId: purchaseId 
     });
 
     if (existingPurchase) {
-      console.log('⚠️ Duplicate purchase:', finalPurchaseId);
+      console.log('⚠️ Duplicate purchase detected:', purchaseId);
       const user = await User.findById(userId);
       return res.status(200).json({ 
         success: true,
@@ -921,103 +1166,59 @@ router.post('/iap-purchase', async (req, res) => {
       });
     }
 
-    // ✅ TEMPORARY BYPASS FOR TESTING - REMOVE IN PRODUCTION
-    console.log('🔄 TEMPORARY: Bypassing Apple verification for testing');
-    let receiptVerified = true;
-    let appleStatus = 0;
-    let appleEnvironment = 'Production-Bypassed';
-    let verificationDetails = {
-      transactionId: finalPurchaseId,
-      note: 'Temporary bypass for testing'
-    };
-
-    // ✅ ORIGINAL VERIFICATION CODE (COMMENTED FOR NOW)
-    /*
-    let receiptVerified = false;
-    let appleStatus = null;
-    let appleEnvironment = null;
-    let verificationDetails = null;
-
-    if (platform === 'ios') {
-      console.log('\n=== 🔐 APPLE RECEIPT VERIFICATION ===');
-      
-      try {
-        // Your original verification code here...
-        // [Keep your original verification code but commented for now]
-        
-      } catch (verificationError) {
-        console.error('❌ Receipt Verification Network Error:', verificationError.message);
-        receiptVerified = false;
-      }
-
-      // ✅ REJECT IF NOT VERIFIED
-      if (!receiptVerified) {
-        console.error('🚫 BLOCKING PURCHASE - RECEIPT NOT VERIFIED');
-        
-        return res.status(400).json({
-          error: 'Receipt verification failed',
-          message: 'Could not verify purchase with Apple',
-          appleStatus: appleStatus,
-          environment: appleEnvironment,
-          details: 'Please contact support if you were charged'
-        });
-      }
-    }
-    */
-
-    // ✅ CREDIT USER (ONLY IF VERIFIED)
-    console.log('\n=== 💰 CREDITING USER ===');
-    
+    // ✅ FIND USER
     const user = await User.findById(userId);
     if (!user) {
       console.error('❌ User not found:', userId);
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // ✅ UPDATE CREDITS
     const oldCredits = user.credits || 0;
     const creditsToAdd = parseInt(credits);
     user.credits = oldCredits + creditsToAdd;
     await user.save();
 
     console.log('✅ Credits Updated:');
-    console.log(`   Old: ${oldCredits}`);
+    console.log(`   Old Balance: ${oldCredits}`);
     console.log(`   Added: +${creditsToAdd}`);
-    console.log(`   New: ${user.credits}`);
+    console.log(`   New Balance: ${user.credits}`);
 
     // ✅ SAVE TRANSACTION
     const transaction = new CreditTransaction({
       userId,
-      purchaseId: finalPurchaseId,
+      purchaseId: purchaseId,
       productId,
       type: "purchase",
       amount: creditsToAdd,
       platform: platform || 'ios',
       status: 'approved',
       timestamp: transactionDate ? new Date(transactionDate) : new Date(),
-      note: `IAP ${platform} (${productId}) [BYPASSED]${verificationDetails ? `, TxID: ${verificationDetails.transactionId}` : ''}`
+      note: `IAP ${platform} (${productId}) [Apple Status: ${appleStatus}, Env: ${appleEnvironment}, TxID: ${transactionId}]`
     });
     await transaction.save();
 
     console.log('✅ Transaction Saved:', transaction._id);
-    console.log('=== ✅ PURCHASE COMPLETED (BYPASSED) ===\n');
+    console.log('=== ✅ PURCHASE COMPLETED SUCCESSFULLY ===\n');
 
     res.status(200).json({
       success: true,
-      message: 'Purchase processed successfully (BYPASS MODE)',
+      message: 'Purchase processed successfully',
       credits: user.credits,
       newBalance: user.credits,
       addedCredits: creditsToAdd,
-      receiptVerified: true,
-      appleStatus: 0,
-      environment: 'Bypassed',
+      verified: true,
+      appleStatus,
+      environment: appleEnvironment,
       transaction: {
         id: transaction._id,
-        purchaseId: finalPurchaseId
+        purchaseId: purchaseId,
+        transactionId: transactionId
       }
     });
 
   } catch (error) {
-    console.error('\n❌ IAP PURCHASE ERROR:', error.message);
+    console.error('\n❌ VERIFIED IAP PURCHASE ERROR:', error.message);
     console.error('Stack:', error.stack);
     
     res.status(500).json({ 
@@ -1027,7 +1228,63 @@ router.post('/iap-purchase', async (req, res) => {
   }
 });
 
+// ✅ KEEP THE FALLBACK DIRECT ENDPOINT (for testing)
+router.post('/add-direct', async (req, res) => {
+  try {
+    const { userId, credits, reason, productId, purchaseId } = req.body;
 
+    console.log('\n=== 🔄 DIRECT CREDIT REQUEST ===');
+    console.log('👤 User ID:', userId);
+    console.log('🪙 Credits:', credits);
+    console.log('📝 Reason:', reason);
+
+    if (!userId || !credits) {
+      return res.status(400).json({ 
+        error: 'Missing userId or credits' 
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const creditsToAdd = parseInt(credits);
+    const oldCredits = user.credits || 0;
+    user.credits = oldCredits + creditsToAdd;
+    await user.save();
+
+    const transaction = new CreditTransaction({
+      userId,
+      purchaseId: purchaseId || `direct-${Date.now()}`,
+      productId: productId || 'direct',
+      type: "purchase",
+      amount: creditsToAdd,
+      platform: 'ios',
+      status: 'approved',
+      timestamp: new Date(),
+      note: `DIRECT: ${reason}`
+    });
+    await transaction.save();
+
+    console.log('✅ Direct Credits Added:');
+    console.log(`   User: ${userId}`);
+    console.log(`   Credits: +${creditsToAdd}`);
+    console.log(`   New Balance: ${user.credits}`);
+
+    res.status(200).json({
+      success: true,
+      credits: user.credits,
+      newBalance: user.credits,
+      addedCredits: creditsToAdd,
+      message: 'Credits added directly'
+    });
+
+  } catch (error) {
+    console.error('❌ Direct credit error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ✅ NEW ROUTE: Direct credits without verification
 router.post('/add-direct', async (req, res) => {
