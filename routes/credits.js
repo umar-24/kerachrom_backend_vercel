@@ -1099,6 +1099,136 @@ router.post('/refund', async (req, res) => {
     // Add this new endpoint to your credits.js file
 
 // ✅ NEW ENDPOINT: IAP Purchase with Flutter-side verification
+// router.post('/iap-verified', async (req, res) => {
+//   try {
+//     const { 
+//       userId, 
+//       purchaseId, 
+//       productId, 
+//       credits, 
+//       platform, 
+//       transactionDate,
+//       verified,
+//       appleStatus,
+//       appleEnvironment,
+//       transactionId
+//     } = req.body;
+
+//     console.log('\n=== 📱 VERIFIED IAP PURCHASE REQUEST ===');
+//     console.log('👤 User ID:', userId);
+//     console.log('🎯 Product ID:', productId);
+//     console.log('💳 Purchase ID:', purchaseId);
+//     console.log('🪙 Credits:', credits);
+//     console.log('📱 Platform:', platform);
+//     console.log('✅ Verified:', verified);
+//     console.log('📊 Apple Status:', appleStatus);
+//     console.log('🌍 Environment:', appleEnvironment);
+//     console.log('🆔 Transaction ID:', transactionId);
+
+//     // ✅ VALIDATION
+//     if (!userId || !purchaseId || !productId || !credits) {
+//       console.error('❌ Missing required fields');
+//       return res.status(400).json({ 
+//         error: 'Missing required fields',
+//         received: { 
+//           userId: !!userId, 
+//           purchaseId: !!purchaseId, 
+//           productId: !!productId, 
+//           credits: !!credits 
+//         }
+//       });
+//     }
+
+//     // ✅ CHECK VERIFICATION STATUS
+//     if (!verified || appleStatus !== 0) {
+//       console.error('❌ Purchase not verified by Apple');
+//       return res.status(400).json({
+//         error: 'Purchase not verified',
+//         message: 'Apple receipt verification failed',
+//         appleStatus: appleStatus
+//       });
+//     }
+
+//     // ✅ CHECK FOR DUPLICATE
+//     const existingPurchase = await CreditTransaction.findOne({ 
+//       purchaseId: purchaseId 
+//     });
+
+//     if (existingPurchase) {
+//       console.log('⚠️ Duplicate purchase detected:', purchaseId);
+//       const user = await User.findById(userId);
+//       return res.status(200).json({ 
+//         success: true,
+//         message: 'Purchase already processed',
+//         newBalance: user.credits,
+//         credits: user.credits,
+//         isDuplicate: true
+//       });
+//     }
+
+//     // ✅ FIND USER
+//     const user = await User.findById(userId);
+//     if (!user) {
+//       console.error('❌ User not found:', userId);
+//       return res.status(404).json({ error: 'User not found' });
+//     }
+
+//     // ✅ UPDATE CREDITS
+//     const oldCredits = user.credits || 0;
+//     const creditsToAdd = parseInt(credits);
+//     user.credits = oldCredits + creditsToAdd;
+//     await user.save();
+
+//     console.log('✅ Credits Updated:');
+//     console.log(`   Old Balance: ${oldCredits}`);
+//     console.log(`   Added: +${creditsToAdd}`);
+//     console.log(`   New Balance: ${user.credits}`);
+
+//     // ✅ SAVE TRANSACTION
+//     const transaction = new CreditTransaction({
+//       userId,
+//       purchaseId: purchaseId,
+//       productId,
+//       type: "purchase",
+//       amount: creditsToAdd,
+//       platform: platform || 'ios',
+//       status: 'approved',
+//       timestamp: transactionDate ? new Date(transactionDate) : new Date(),
+//       note: `IAP ${platform} (${productId}) [Apple Status: ${appleStatus}, Env: ${appleEnvironment}, TxID: ${transactionId}]`
+//     });
+//     await transaction.save();
+
+//     console.log('✅ Transaction Saved:', transaction._id);
+//     console.log('=== ✅ PURCHASE COMPLETED SUCCESSFULLY ===\n');
+
+//     res.status(200).json({
+//       success: true,
+//       message: 'Purchase processed successfully',
+//       credits: user.credits,
+//       newBalance: user.credits,
+//       addedCredits: creditsToAdd,
+//       verified: true,
+//       appleStatus,
+//       environment: appleEnvironment,
+//       transaction: {
+//         id: transaction._id,
+//         purchaseId: purchaseId,
+//         transactionId: transactionId
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('\n❌ VERIFIED IAP PURCHASE ERROR:', error.message);
+//     console.error('Stack:', error.stack);
+    
+//     res.status(500).json({ 
+//       error: 'Server error processing purchase',
+//       details: error.message 
+//     });
+//   }
+// });
+
+
 router.post('/iap-verified', async (req, res) => {
   try {
     const { 
@@ -1228,6 +1358,7 @@ router.post('/iap-verified', async (req, res) => {
   }
 });
 
+
 // ✅ KEEP THE FALLBACK DIRECT ENDPOINT (for testing)
 router.post('/add-direct', async (req, res) => {
   try {
@@ -1347,6 +1478,23 @@ router.post('/add-direct', async (req, res) => {
 });
 
 // Get user credits
+// router.get('/balance/:userId', async (req, res) => {
+//   try {
+//     const user = await User.findById(req.params.userId);
+//     if (!user) {
+//       return res.status(404).json({ error: 'User not found' });
+//     }
+    
+//     res.json({
+//       credits: user.credits || 0,
+//       userId: user._id
+//     });
+//   } catch (error) {
+//     console.error('Error fetching balance:', error);
+//     res.status(500).json({ error: 'Failed to fetch balance' });
+//   }
+// });
+
 router.get('/balance/:userId', async (req, res) => {
   try {
     const user = await User.findById(req.params.userId);
@@ -1364,6 +1512,173 @@ router.get('/balance/:userId', async (req, res) => {
   }
 });
 
+
+router.get("/transactions/:userId", async (req, res) => {
+  try {
+    const transactions = await CreditTransaction.find({
+      userId: req.params.userId
+    }).sort({ timestamp: -1 });
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get all purchases (Admin)
+router.get("/all-purchases", async (req, res) => {
+  try {
+    const transactions = await CreditTransaction.find({ type: "purchase" })
+      .sort({ timestamp: -1 })
+      .populate("userId", "firstName lastName email");
+    
+    res.json(transactions);
+  } catch (err) {
+    console.error("Error fetching all purchases:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Manual purchase request (Web/Android)
+router.post("/purchase", async (req, res) => {
+  const { userId, amount, note, screenshotUrl } = req.body;
+
+  if (!userId || !amount || !screenshotUrl) {
+    return res.status(400).send("Missing required fields");
+  }
+
+  const transaction = new CreditTransaction({
+    userId,
+    type: "purchase",
+    amount,
+    note: note || "Purchase request submitted",
+    screenshotUrl,
+    status: "pending"
+  });
+
+  await transaction.save();
+  res.status(200).send({ message: "Purchase request submitted", transactionId: transaction._id });
+});
+
+// Get pending purchases
+router.get("/pending", async (req, res) => {
+  try {
+    const transactions = await CreditTransaction.find({ 
+      type: "purchase", 
+      status: "pending" 
+    }).populate("userId", "firstName lastName email");
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Approve purchase
+router.post("/approve/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { approvedAmount } = req.body;
+
+    const transaction = await CreditTransaction.findById(id);
+    if (!transaction) {
+      return res.status(404).json({ message: "Transaction not found" });
+    }
+
+    const creditsToAdd = approvedAmount || transaction.amount;
+
+    transaction.status = "approved";
+    await transaction.save();
+
+    const updatedUser = await User.findByIdAndUpdate(
+      transaction.userId,
+      { $inc: { credits: creditsToAdd } },
+      { new: true }
+    );
+
+    res.json({ 
+      message: "Purchase approved",
+      transactionAmount: transaction.amount,
+      addedAmount: creditsToAdd,
+      newBalance: updatedUser.credits
+    });
+    
+  } catch (err) {
+    console.error("Approval error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Reject purchase
+router.post("/reject/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    const transaction = await CreditTransaction.findByIdAndUpdate(
+      id,
+      { 
+        status: "rejected",
+        note: reason || "Purchase rejected" 
+      },
+      { new: true }
+    );
+    
+    res.json({ message: "Purchase rejected", transaction });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Deduct credits
+router.post('/deduct', async (req, res) => {
+  const { userId, amount } = req.body;
+
+  if (!userId || !amount) return res.status(400).json({ message: 'Missing data' });
+
+  const user = await User.findById(userId);
+  if (!user) return res.status(404).json({ message: 'User not found' });
+
+  if (user.credits < amount) {
+    return res.status(400).json({ message: 'Insufficient credits' });
+  }
+
+  user.credits -= amount;
+  await user.save();
+
+  await CreditTransaction.create({
+    userId,
+    type: "usage",
+    amount,
+    note: `Deducted for download`,
+    status: "approved"
+  });
+
+  res.json({ message: 'Credits deducted', newBalance: user.credits });
+});
+
+// Refund credits
+router.post('/refund', async (req, res) => {
+  const { userId, amount } = req.body;
+
+  if (!userId || !amount) return res.status(400).json({ message: 'Missing data' });
+
+  const user = await User.findById(userId);
+  if (!user) return res.status(404).json({ message: 'User not found' });
+
+  user.credits += amount;
+  await user.save();
+
+  await CreditTransaction.create({
+    userId,
+    type: "refund",
+    amount,
+    note: `Refunded after cancel`,
+    status: "approved"
+  });
+
+  res.json({ message: 'Credits refunded', newBalance: user.credits });
+});
+
+// module.exports = router;
 // Add these to your existing credits.js file
 
 // PayPal Create Order
