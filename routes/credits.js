@@ -66,7 +66,7 @@ router.post("/verify-iap", async (req, res) => {
     );
 
     // If sandbox receipt (status 21007), redirect to sandbox
-    if (appleResponse.data.status === 21007) {
+    if (appleResponse.data.status === 21000) {
       console.log("🔵 Redirecting to Sandbox environment...");
       appleResponse = await axios.post(
         "https://sandbox.itunes.apple.com/verifyReceipt", 
