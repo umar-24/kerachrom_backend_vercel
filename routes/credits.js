@@ -4,218 +4,205 @@ const User = require("../models/user");
 const CreditTransaction = require("../models/credits");
 const axios = require('axios');
 
-// ✅ iOS In-App Purchase Verification
-// router.post("/verify-iap", async (req, res) => {
-//   const { userId, productId, receipt, platform } = req.body;
-
-//   console.log("IAP Verification Request:", { userId, productId, platform });
-
-//   if (!userId || !receipt || !productId || platform !== 'ios') {
-//     return res.status(400).json({ 
-//       success: false,
-//       message: "Missing required fields or invalid platform" 
-//     });
-//   }
-
-//   try {
-//     // Check if transaction already processed (prevent duplicates)
-//     const existingTransaction = await CreditTransaction.findOne({
-//       userId,
-//       receiptData: receipt,
-//       status: "approved"
-//     });
-
-//     if (existingTransaction) {
-//       console.log("Duplicate transaction detected");
-//       return res.status(200).json({ 
-//         success: true,
-//         message: "Transaction already processed",
-//         alreadyProcessed: true
-//       });
-//     }
-
-//     // Verify receipt with Apple
-//     const verifyUrl = process.env.APPLE_SANDBOX_MODE === 'true' 
-//       ? "https://sandbox.itunes.apple.com/verifyReceipt"
-//       : "https://buy.itunes.apple.com/verifyReceipt";
-
-//     console.log("Verifying with Apple:", verifyUrl);
-
-//     const appleResponse = await axios.post(verifyUrl, {
-//       "receipt-data": receipt,
-//       "password": process.env.APPLE_SHARED_SECRET,
-//       "exclude-old-transactions": true
-//     });
-
-//     const appleData = appleResponse.data;
-//     console.log("Apple Response Status:", appleData.status);
-
-//     // Handle sandbox redirect (status 21007)
-//     if (appleData.status === 21007) {
-//       console.log("Redirecting to sandbox...");
-//       const sandboxResponse = await axios.post(
-//         "https://sandbox.itunes.apple.com/verifyReceipt",
-//         {
-//           "receipt-data": receipt,
-//           "password": process.env.APPLE_SHARED_SECRET,
-//           "exclude-old-transactions": true
-//         }
-//       );
-//       appleData.status = sandboxResponse.data.status;
-//       appleData.receipt = sandboxResponse.data.receipt;
-//     }
-
-//     // Check verification status
-//     if (appleData.status !== 0) {
-//       console.error("Apple verification failed:", appleData.status);
-//       return res.status(400).json({ 
-//         success: false,
-//         message: "Receipt verification failed", 
-//         appleStatus: appleData.status 
-//       });
-//     }
-
-//     // Map product ID to credits
-//     const productCreditsMap = {
-//       'com.kerachrom.starter.app': 50,
-//       'com.kerachrom.premium.app': 100,
-//       'com.kerachrom.ultimate.app': 200
-//     };
-
-//     const creditsToAdd = productCreditsMap[productId];
-
-//     if (!creditsToAdd) {
-//       console.error("Unknown product ID:", productId);
-//       return res.status(400).json({ 
-//         success: false,
-//         message: "Unknown product ID" 
-//       });
-//     }
-
-//     // Update user credits
-//     const updatedUser = await User.findByIdAndUpdate(
-//       userId,
-//       { $inc: { credits: creditsToAdd } },
-//       { new: true }
-//     );
-
-//     if (!updatedUser) {
-//       return res.status(404).json({ 
-//         success: false,
-//         message: "User not found" 
-//       });
-//     }
-
-//     // Create transaction record
-//     await CreditTransaction.create({
-//       userId,
-//       type: "purchase",
-//       amount: creditsToAdd,
-//       productId,
-//       receiptData: receipt,
-//       platform: "ios",
-//       note: `iOS In-App Purchase - ${creditsToAdd} Credits`,
-//       status: "approved",
-//       timestamp: new Date()
-//     });
-
-//     console.log("Credits added successfully:", creditsToAdd);
-
-//     res.json({
-//       success: true,
-//       message: "Purchase verified and credits added",
-//       addedCredits: creditsToAdd,
-//       newBalance: updatedUser.credits
-//     });
-
-//   } catch (err) {
-//     console.error("iOS verification error:", err.message);
-//     res.status(500).json({ 
-//       success: false,
-//       message: "Server error verifying receipt",
-//       error: err.message 
-//     });
-//   }
-// });
-
+// ✅ iOS In-App Purchase Verification (FIXED)
 router.post("/verify-iap", async (req, res) => {
   const { userId, "receipt-data": receiptData, productId, transactionId } = req.body;
 
+  console.log("═══════════════════════════════════");
+  console.log("🔵 IAP Verification Request:");
+  console.log("   User ID:", userId);
+  console.log("   Product ID:", productId);
+  console.log("   Transaction ID:", transactionId);
+  console.log("   Receipt length:", receiptData?.length);
+  console.log("   Receipt preview (first 50):", receiptData?.substring(0, 50));
+  console.log("═══════════════════════════════════");
+
   if (!userId || !receiptData) {
-    return res.status(400).json({ status: "error", message: "Missing required fields" });
+    console.log("❌ Missing required fields");
+    return res.status(400).json({ 
+      status: "error", 
+      message: "Missing required fields (userId, receipt-data)" 
+    });
+  }
+
+  // ✅ Validate that receipt is proper base64
+  const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+  if (!base64Regex.test(receiptData) || receiptData.length % 4 !== 0) {
+    console.error("❌ Invalid base64 receipt format");
+    return res.status(400).json({
+      status: "error",
+      message: "Receipt data must be valid base64 encoded string"
+    });
   }
 
   try {
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ status: "error", message: "User not found" });
+    if (!user) {
+      console.log("❌ User not found:", userId);
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
 
     const sharedSecret = process.env.APPLE_SHARED_SECRET;
+    
+    if (!sharedSecret) {
+      console.error("❌ APPLE_SHARED_SECRET not configured in environment");
+      return res.status(500).json({ 
+        status: "error", 
+        message: "Server configuration error" 
+      });
+    }
+
     const requestBody = {
       "receipt-data": receiptData,
       "password": sharedSecret,
       "exclude-old-transactions": true,
     };
 
-    let appleResponse = await axios.post("https://buy.itunes.apple.com/verifyReceipt", requestBody);
+    console.log("🔵 Verifying with Apple Production...");
+    let appleResponse = await axios.post(
+      "https://buy.itunes.apple.com/verifyReceipt", 
+      requestBody,
+      { timeout: 10000 }
+    );
 
-    // If sandbox receipt, redirect verification
+    // If sandbox receipt (status 21007), redirect to sandbox
     if (appleResponse.data.status === 21007) {
-      appleResponse = await axios.post("https://sandbox.itunes.apple.com/verifyReceipt", requestBody);
+      console.log("🔵 Redirecting to Sandbox environment...");
+      appleResponse = await axios.post(
+        "https://sandbox.itunes.apple.com/verifyReceipt", 
+        requestBody,
+        { timeout: 10000 }
+      );
     }
 
     const data = appleResponse.data;
-    console.log("🍏 Apple Verification Response:", JSON.stringify(data, null, 2));
+    console.log("🍎 Apple Verification Response:");
+    console.log("   Status:", data.status);
+    console.log("   Environment:", data.environment);
+    console.log(JSON.stringify(data, null, 2));
 
+    // Check if verification was successful
     if (data.status !== 0) {
-      return res.status(400).json({ status: "error", message: "Apple receipt invalid", code: data.status });
+      console.error("❌ Apple receipt invalid, status:", data.status);
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Apple receipt invalid", 
+        code: data.status 
+      });
     }
 
+    // Find the transaction in the receipt
     const inApp = data.receipt?.in_app || [];
-    const validTx = inApp.find((tx) => tx.transaction_id === transactionId);
+    console.log("🔵 In-app purchases in receipt:", inApp.length);
+    
+    let validTx = null;
+    if (transactionId) {
+      validTx = inApp.find((tx) => tx.transaction_id === transactionId);
+    } else {
+      // If no transaction ID provided, get the most recent one for this product
+      const productTxs = inApp.filter(tx => tx.product_id === productId);
+      if (productTxs.length > 0) {
+        validTx = productTxs.sort((a, b) => 
+          parseInt(b.purchase_date_ms) - parseInt(a.purchase_date_ms)
+        )[0];
+      }
+    }
 
     if (!validTx) {
-      return res.status(400).json({ status: "error", message: "Transaction not found in receipt" });
+      console.error("❌ Transaction not found in receipt");
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Transaction not found in receipt" 
+      });
     }
+
+    console.log("✅ Valid transaction found:", validTx.transaction_id);
 
     // Prevent duplicates
-    const existingTx = await CreditTransaction.findOne({ appleTransactionId: transactionId });
+    const existingTx = await CreditTransaction.findOne({ 
+      appleTransactionId: validTx.transaction_id 
+    });
+    
     if (existingTx) {
-      return res.status(200).json({ status: "success", message: "Duplicate transaction ignored" });
+      console.log("⚠️ Duplicate transaction detected:", validTx.transaction_id);
+      return res.status(200).json({ 
+        status: "success", 
+        message: "Duplicate transaction - already processed",
+        addedCredits: 0,
+        newBalance: user.credits
+      });
     }
 
-    // Determine credits based on productId
+    // ✅ Map product ID to credits (update these to match your actual product IDs)
     let creditsToAdd = 0;
-    if (productId === "credits_100") creditsToAdd = 100;
-    if (productId === "credits_500") creditsToAdd = 500;
-    if (productId === "credits_1000") creditsToAdd = 1000;
+    
+    // Map your actual product IDs here
+    const productCreditsMap = {
+      'com.kerachrom.starter.app': 50,
+      // Add more products as needed:
+      // 'com.kerachrom.premium.app': 100,
+      // 'com.kerachrom.ultimate.app': 200,
+    };
 
+    creditsToAdd = productCreditsMap[productId] || 0;
+
+    if (creditsToAdd === 0) {
+      console.error("❌ Unknown or invalid product ID:", productId);
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Unknown product ID: " + productId 
+      });
+    }
+
+    console.log("🔵 Adding credits:", creditsToAdd);
+
+    // Update user credits
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $inc: { credits: creditsToAdd } },
       { new: true }
     );
 
+    // Create transaction record
     await CreditTransaction.create({
       userId,
       productId,
-      appleTransactionId: transactionId,
+      appleTransactionId: validTx.transaction_id,
       credits: creditsToAdd,
+      amount: creditsToAdd, // for compatibility
       receiptData,
       status: "approved",
       method: "iap",
+      type: "purchase",
+      platform: "ios",
+      note: `iOS In-App Purchase - ${creditsToAdd} Credits`,
+      timestamp: new Date()
     });
+
+    console.log("✅ Credits added successfully!");
+    console.log("   Added:", creditsToAdd);
+    console.log("   New balance:", updatedUser.credits);
 
     res.status(200).json({
       status: "success",
+      message: "Purchase verified and credits added",
       addedCredits: creditsToAdd,
       newBalance: updatedUser.credits,
     });
+
   } catch (err) {
-    console.error("❌ IAP verification error:", err.response?.data || err.message);
-    res.status(500).json({ status: "error", message: "Server error verifying receipt" });
+    console.error("❌ IAP verification error:");
+    console.error("   Message:", err.message);
+    console.error("   Response:", err.response?.data);
+    console.error("   Stack:", err.stack);
+    
+    res.status(500).json({ 
+      status: "error", 
+      message: "Server error verifying receipt",
+      details: err.message
+    });
   }
 });
-
 
 // ✅ Get all purchases (for admin)
 router.get("/all-purchases", async (req, res) => {
