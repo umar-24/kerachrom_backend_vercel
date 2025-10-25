@@ -2,71 +2,95 @@ const express = require("express");
 const router = express.Router();
 const User = require("../models/user");
 const CreditTransaction = require("../models/credits");
+const axios = require('axios');
 
 // ✅ iOS In-App Purchase Verification
-router.post("/verify-ios", async (req, res) => {
-  const { userId, receiptData, productId } = req.body;
+router.post("/verify-iap", async (req, res) => {
+  const { userId, productId, receipt, platform } = req.body;
 
-  if (!userId || !receiptData || !productId) {
-    return res.status(400).json({ message: "Missing required fields" });
+  console.log("IAP Verification Request:", { userId, productId, platform });
+
+  if (!userId || !receipt || !productId || platform !== 'ios') {
+    return res.status(400).json({ 
+      success: false,
+      message: "Missing required fields or invalid platform" 
+    });
   }
 
   try {
-    // Determine environment
-    const isSandbox = process.env.APPLE_SANDBOX === 'true';
-    const verifyUrl = isSandbox
+    // Check if transaction already processed (prevent duplicates)
+    const existingTransaction = await CreditTransaction.findOne({
+      userId,
+      receiptData: receipt,
+      status: "approved"
+    });
+
+    if (existingTransaction) {
+      console.log("Duplicate transaction detected");
+      return res.status(200).json({ 
+        success: true,
+        message: "Transaction already processed",
+        alreadyProcessed: true
+      });
+    }
+
+    // Verify receipt with Apple
+    const verifyUrl = process.env.APPLE_SANDBOX_MODE === 'true' 
       ? "https://sandbox.itunes.apple.com/verifyReceipt"
       : "https://buy.itunes.apple.com/verifyReceipt";
 
-    console.log(`🔍 Verifying iOS receipt for ${productId} (${isSandbox ? 'sandbox' : 'production'})`);
+    console.log("Verifying with Apple:", verifyUrl);
 
-    // Call Apple's verification API
-    const response = await fetch(verifyUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        "receipt-data": receiptData,
-        "password": process.env.APPLE_SHARED_SECRET,
-        "exclude-old-transactions": true
-      }),
+    const appleResponse = await axios.post(verifyUrl, {
+      "receipt-data": receipt,
+      "password": process.env.APPLE_SHARED_SECRET,
+      "exclude-old-transactions": true
     });
 
-    const data = await response.json();
-    console.log('📡 Apple response status:', data.status);
+    const appleData = appleResponse.data;
+    console.log("Apple Response Status:", appleData.status);
 
-    // Handle sandbox receipt sent to production
-    if (data.status === 21007) {
-      console.log('🔄 Sandbox receipt detected, retrying with sandbox URL');
-      return res.status(400).json({ 
-        message: "Use sandbox environment", 
-        appleStatus: data.status 
-      });
+    // Handle sandbox redirect (status 21007)
+    if (appleData.status === 21007) {
+      console.log("Redirecting to sandbox...");
+      const sandboxResponse = await axios.post(
+        "https://sandbox.itunes.apple.com/verifyReceipt",
+        {
+          "receipt-data": receipt,
+          "password": process.env.APPLE_SHARED_SECRET,
+          "exclude-old-transactions": true
+        }
+      );
+      appleData.status = sandboxResponse.data.status;
+      appleData.receipt = sandboxResponse.data.receipt;
     }
 
     // Check verification status
-    if (data.status !== 0) {
-      console.error('❌ Invalid receipt:', data.status);
+    if (appleData.status !== 0) {
+      console.error("Apple verification failed:", appleData.status);
       return res.status(400).json({ 
-        message: "Invalid receipt", 
-        appleStatus: data.status 
+        success: false,
+        message: "Receipt verification failed", 
+        appleStatus: appleData.status 
       });
     }
 
-    // Determine credits based on productId
-    let creditsToAdd = 0;
-    switch (productId) {
-      case "com.kerachrom.starter.app":
-        creditsToAdd = 50; // or whatever your product gives
-        break;
-      case "credits_100":
-        creditsToAdd = 100;
-        break;
-      default:
-        console.error('❌ Unknown product ID:', productId);
-        return res.status(400).json({ message: "Unknown product ID" });
-    }
+    // Map product ID to credits
+    const productCreditsMap = {
+      'com.kerachrom.starter.app': 50,
+      'com.kerachrom.premium.app': 100,
+      'com.kerachrom.ultimate.app': 200
+    };
 
-    console.log(`💰 Adding ${creditsToAdd} credits to user ${userId}`);
+    const creditsToAdd = productCreditsMap[productId];
+
+    if (!creditsToAdd) {
+      console.error("Unknown product ID:", productId);
+      return res.status(400).json({ 
+        success: false,
+        message: "Unknown product ID" 
+      });
+    }
 
     // Update user credits
     const updatedUser = await User.findByIdAndUpdate(
@@ -76,66 +100,46 @@ router.post("/verify-ios", async (req, res) => {
     );
 
     if (!updatedUser) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ 
+        success: false,
+        message: "User not found" 
+      });
     }
 
-    // Log transaction
+    // Create transaction record
     await CreditTransaction.create({
       userId,
       type: "purchase",
       amount: creditsToAdd,
-      productId: productId,
-      note: `iOS In-App Purchase (${productId})`,
+      productId,
+      receiptData: receipt,
+      platform: "ios",
+      note: `iOS In-App Purchase - ${creditsToAdd} Credits`,
       status: "approved",
       timestamp: new Date()
     });
 
-    console.log('✅ Purchase verified successfully');
-    
+    console.log("Credits added successfully:", creditsToAdd);
+
     res.json({
-      message: "iOS purchase verified successfully",
+      success: true,
+      message: "Purchase verified and credits added",
       addedCredits: creditsToAdd,
-      newBalance: updatedUser.credits,
+      newBalance: updatedUser.credits
     });
+
   } catch (err) {
-    console.error("❌ iOS verification error:", err);
-    res.status(500).json({ message: "Server error verifying receipt" });
+    console.error("iOS verification error:", err.message);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error verifying receipt",
+      error: err.message 
+    });
   }
 });
 
-// ✅ Get User Credits
-router.get("/user/:userId", async (req, res) => {
-  try {
-    const user = await User.findById(req.params.userId).select("credits firstName lastName email");
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    res.json({ credits: user.credits });
-  } catch (err) {
-    console.error("Error fetching user credits:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ✅ Get User's Purchase History
-router.get("/:userId", async (req, res) => {
-  try {
-    const transactions = await CreditTransaction.find({
-      userId: req.params.userId,
-      type: "purchase"
-    }).sort({ timestamp: -1 });
-    
-    res.json(transactions);
-  } catch (err) {
-    console.error("Error fetching purchase history:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ✅ Get All Purchases (Admin)
-router.get("/admin/all-purchases", async (req, res) => {
+// ✅ Get all purchases (for admin)
+router.get("/all-purchases", async (req, res) => {
   try {
     const transactions = await CreditTransaction.find({ type: "purchase" })
       .sort({ timestamp: -1 })
@@ -143,28 +147,65 @@ router.get("/admin/all-purchases", async (req, res) => {
     
     res.json(transactions);
   } catch (err) {
-    console.error("Error fetching all purchases:", err);
+    console.error("Error fetching purchases:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// ✅ Get Pending Purchases (Admin)
-router.get("/admin/pending", async (req, res) => {
+// ✅ Manual purchase submission (PayPal/Bank Transfer)
+router.post("/purchase", async (req, res) => {
+  const { userId, amount, note, screenshotUrl } = req.body;
+
+  if (!userId || !amount || !screenshotUrl) {
+    return res.status(400).json({ 
+      success: false,
+      message: "Missing required fields" 
+    });
+  }
+
+  try {
+    const transaction = await CreditTransaction.create({
+      userId,
+      type: "purchase",
+      amount,
+      note: note || "Manual purchase request",
+      screenshotUrl,
+      platform: "manual",
+      status: "pending",
+      timestamp: new Date()
+    });
+
+    res.status(200).json({ 
+      success: true,
+      message: "Purchase request submitted", 
+      transactionId: transaction._id 
+    });
+  } catch (err) {
+    console.error("Purchase submission error:", err);
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to submit purchase request" 
+    });
+  }
+});
+
+// ✅ Get pending purchases (for admin)
+router.get("/pending", async (req, res) => {
   try {
     const transactions = await CreditTransaction.find({ 
       type: "purchase", 
       status: "pending" 
-    }).populate("userId", "firstName lastName email");
+    }).populate("userId", "firstName lastName email")
+      .sort({ timestamp: -1 });
     
     res.json(transactions);
   } catch (err) {
-    console.error("Error fetching pending purchases:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ Approve Purchase (Admin)
-router.post("/admin/approve/:id", async (req, res) => {
+// ✅ Approve manual purchase (admin only)
+router.post("/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { approvedAmount } = req.body;
@@ -174,10 +215,15 @@ router.post("/admin/approve/:id", async (req, res) => {
       return res.status(404).json({ message: "Transaction not found" });
     }
 
+    if (transaction.status !== "pending") {
+      return res.status(400).json({ message: "Transaction already processed" });
+    }
+
     const creditsToAdd = approvedAmount || transaction.amount;
 
-    // Update transaction status
+    // Update transaction
     transaction.status = "approved";
+    transaction.approvedAmount = creditsToAdd;
     await transaction.save();
 
     // Add credits to user
@@ -187,9 +233,8 @@ router.post("/admin/approve/:id", async (req, res) => {
       { new: true }
     );
 
-    console.log(`✅ Approved ${creditsToAdd} credits for user ${transaction.userId}`);
-
     res.json({ 
+      success: true,
       message: "Purchase approved",
       transactionAmount: transaction.amount,
       addedAmount: creditsToAdd,
@@ -202,32 +247,52 @@ router.post("/admin/approve/:id", async (req, res) => {
   }
 });
 
-// ✅ Reject Purchase (Admin)
-router.post("/admin/reject/:id", async (req, res) => {
+// ✅ Reject manual purchase (admin only)
+router.post("/reject/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
     
-    const transaction = await CreditTransaction.findByIdAndUpdate(
-      id,
-      { 
-        status: "rejected",
-        note: reason || "Purchase rejected" 
-      },
-      { new: true }
-    );
+    const transaction = await CreditTransaction.findById(id);
+    if (!transaction) {
+      return res.status(404).json({ message: "Transaction not found" });
+    }
+
+    if (transaction.status !== "pending") {
+      return res.status(400).json({ message: "Transaction already processed" });
+    }
+
+    transaction.status = "rejected";
+    transaction.note = reason || "Purchase rejected by admin";
+    await transaction.save();
     
-    console.log(`❌ Rejected transaction ${id}`);
-    res.json({ message: "Purchase rejected", transaction });
+    res.json({ 
+      success: true,
+      message: "Purchase rejected", 
+      transaction 
+    });
   } catch (err) {
-    console.error("Rejection error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ Deduct Credits (for downloads, etc.)
+// ✅ Get user's credit transactions
+router.get("/:userId", async (req, res) => {
+  try {
+    const transactions = await CreditTransaction.find({
+      userId: req.params.userId,
+      type: "purchase"
+    }).sort({ timestamp: -1 });
+    
+    res.json(transactions);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ✅ Deduct credits (for downloads/usage)
 router.post('/deduct', async (req, res) => {
-  const { userId, amount } = req.body;
+  const { userId, amount, note } = req.body;
 
   if (!userId || !amount) {
     return res.status(400).json({ message: 'Missing data' });
@@ -240,7 +305,11 @@ router.post('/deduct', async (req, res) => {
     }
 
     if (user.credits < amount) {
-      return res.status(400).json({ message: 'Insufficient credits' });
+      return res.status(400).json({ 
+        message: 'Insufficient credits',
+        currentBalance: user.credits,
+        required: amount
+      });
     }
 
     user.credits -= amount;
@@ -250,23 +319,26 @@ router.post('/deduct', async (req, res) => {
     await CreditTransaction.create({
       userId,
       type: "usage",
-      amount: -amount,
-      note: `Credits deducted for download`,
+      amount,
+      note: note || "Credits deducted for usage",
       status: "approved",
       timestamp: new Date()
     });
 
-    console.log(`💸 Deducted ${amount} credits from user ${userId}`);
-    res.json({ message: 'Credits deducted', newBalance: user.credits });
+    res.json({ 
+      success: true,
+      message: 'Credits deducted', 
+      newBalance: user.credits 
+    });
   } catch (err) {
-    console.error("Deduction error:", err);
-    res.status(500).json({ message: err.message });
+    console.error("Deduct error:", err);
+    res.status(500).json({ message: "Failed to deduct credits" });
   }
 });
 
-// ✅ Refund Credits
+// ✅ Refund credits
 router.post('/refund', async (req, res) => {
-  const { userId, amount } = req.body;
+  const { userId, amount, note } = req.body;
 
   if (!userId || !amount) {
     return res.status(400).json({ message: 'Missing data' });
@@ -281,21 +353,23 @@ router.post('/refund', async (req, res) => {
     user.credits += amount;
     await user.save();
 
-    // Log refund transaction
     await CreditTransaction.create({
       userId,
       type: "refund",
-      amount: amount,
-      note: `Refunded after cancellation`,
+      amount,
+      note: note || "Credits refunded",
       status: "approved",
       timestamp: new Date()
     });
 
-    console.log(`🔄 Refunded ${amount} credits to user ${userId}`);
-    res.json({ message: 'Credits refunded', newBalance: user.credits });
+    res.json({ 
+      success: true,
+      message: 'Credits refunded', 
+      newBalance: user.credits 
+    });
   } catch (err) {
     console.error("Refund error:", err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: "Failed to refund credits" });
   }
 });
 
