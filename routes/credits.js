@@ -467,6 +467,22 @@ router.get("/:userId", async (req, res) => {
   }
 });
 
+
+// ✅ Get user's current credit balance
+router.get("/balance/:userId", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select("credits");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json({ success: true, credits: user.credits });
+  } catch (err) {
+    console.error("Balance fetch error:", err);
+    res.status(500).json({ message: "Server error fetching balance" });
+  }
+});
+
+
 // ✅ Deduct credits (for downloads/usage)
 router.post('/deduct', async (req, res) => {
   const { userId, amount } = req.body;
