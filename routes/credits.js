@@ -469,48 +469,29 @@ router.get("/:userId", async (req, res) => {
 
 // ✅ Deduct credits (for downloads/usage)
 router.post('/deduct', async (req, res) => {
-  const { userId, amount, note } = req.body;
+  const { userId, amount } = req.body;
 
-  if (!userId || !amount) {
-    return res.status(400).json({ message: 'Missing data' });
+  if (!userId || !amount) return res.status(400).json({ message: 'Missing data' });
+
+  const user = await User.findById(userId);
+  if (!user) return res.status(404).json({ message: 'User not found' });
+
+  if (user.credits < amount) {
+    return res.status(400).json({ message: 'Insufficient credits' });
   }
 
-  try {
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+  user.credits -= amount;
+  await user.save();
 
-    if (user.credits < amount) {
-      return res.status(400).json({ 
-        message: 'Insufficient credits',
-        currentBalance: user.credits,
-        required: amount
-      });
-    }
+  await CreditTransaction.create({
+    userId,
+    type: "usage",
+    amount,
+    note: `Deducted for download`,
+    status: "approved"
+  });
 
-    user.credits -= amount;
-    await user.save();
-
-    // Log transaction
-    await CreditTransaction.create({
-      userId,
-      type: "usage",
-      amount,
-      note: note || "Credits deducted for usage",
-      status: "approved",
-      timestamp: new Date()
-    });
-
-    res.json({ 
-      success: true,
-      message: 'Credits deducted', 
-      newBalance: user.credits 
-    });
-  } catch (err) {
-    console.error("Deduct error:", err);
-    res.status(500).json({ message: "Failed to deduct credits" });
-  }
+  res.json({ message: 'Credits deducted', newBalance: user.credits });
 });
 
 // ✅ Refund credits
