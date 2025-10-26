@@ -4,6 +4,8 @@ const User = require("../models/user");
 const CreditTransaction = require("../models/credits");
 const axios = require('axios');
 
+
+
 // ✅ iOS In-App Purchase Verification (FIXED)
 router.post("/verify-iap", async (req, res) => {
   const { userId, "receipt-data": receiptData, productId, transactionId } = req.body;
@@ -139,9 +141,6 @@ router.post("/verify-iap", async (req, res) => {
     // Map your actual product IDs here
     const productCreditsMap = {
       'com.kerachrom.starter.app': 50,
-      // Add more products as needed:
-      // 'com.kerachrom.premium.app': 100,
-      // 'com.kerachrom.ultimate.app': 200,
     };
 
     creditsToAdd = productCreditsMap[productId] || 0;
