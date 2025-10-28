@@ -547,4 +547,133 @@ router.post('/refund', async (req, res) => {
   }
 });
 
+// ✅ Stripe Payment Success - Add Credits
+router.post("/stripe-payment-success", async (req, res) => {
+  const { 
+    userId, 
+    productId, 
+    paymentIntentId, 
+    amount, 
+    currency,
+    customerEmail,
+    metadata 
+  } = req.body;
+
+  console.log("═══════════════════════════════════");
+  console.log("💳 Stripe Payment Success Request:");
+  console.log("   User ID:", userId);
+  console.log("   Product ID:", productId);
+  console.log("   Payment Intent ID:", paymentIntentId);
+  console.log("   Amount:", amount, currency);
+  console.log("   Customer Email:", customerEmail);
+  console.log("═══════════════════════════════════");
+
+  // Validation
+  if (!userId || !productId || !paymentIntentId) {
+    console.log("❌ Missing required fields");
+    return res.status(400).json({ 
+      success: false,
+      message: "Missing required fields (userId, productId, paymentIntentId)" 
+    });
+  }
+
+  try {
+    // ✅ Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      console.log("❌ User not found:", userId);
+      return res.status(404).json({ 
+        success: false,
+        message: "User not found" 
+      });
+    }
+
+    // ✅ Check for duplicate transaction (prevent double credit)
+    const existingTx = await CreditTransaction.findOne({ 
+      stripePaymentIntentId: paymentIntentId 
+    });
+    
+    if (existingTx) {
+      console.log("⚠️ Duplicate transaction detected:", paymentIntentId);
+      return res.status(200).json({ 
+        success: true,
+        message: "Transaction already processed",
+        addedCredits: 0,
+        newBalance: user.credits,
+        isDuplicate: true
+      });
+    }
+
+    // ✅ Map product ID to credits
+    const productCreditsMap = {
+      'stripe_50_credits': 50,
+      'stripe_100_credits': 100,
+      'stripe_200_credits': 200,
+      'stripe_500_credits': 500,
+      // Aap apne products ke mutabiq yahan add karein
+    };
+
+    const creditsToAdd = productCreditsMap[productId] || 0;
+
+    if (creditsToAdd === 0) {
+      console.error("❌ Unknown or invalid product ID:", productId);
+      return res.status(400).json({ 
+        success: false,
+        message: "Unknown product ID: " + productId 
+      });
+    }
+
+    console.log("🔵 Adding credits:", creditsToAdd);
+
+    // ✅ Update user credits
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $inc: { credits: creditsToAdd } },
+      { new: true }
+    );
+
+    // ✅ Create transaction record
+    await CreditTransaction.create({
+      userId,
+      productId,
+      stripePaymentIntentId: paymentIntentId,
+      credits: creditsToAdd,
+      amount: amount || creditsToAdd,
+      currency: currency || 'usd',
+      customerEmail: customerEmail || user.email,
+      status: "approved",
+      method: "stripe",
+      type: "purchase",
+      platform: "stripe",
+      note: `Stripe Payment - ${creditsToAdd} Credits`,
+      metadata: metadata || {},
+      timestamp: new Date()
+    });
+
+    console.log("✅ Credits added successfully!");
+    console.log("   Added:", creditsToAdd);
+    console.log("   New balance:", updatedUser.credits);
+
+    res.status(200).json({
+      success: true,
+      message: "Payment verified and credits added successfully",
+      addedCredits: creditsToAdd,
+      newBalance: updatedUser.credits,
+      transactionId: paymentIntentId
+    });
+
+  } catch (err) {
+    console.error("❌ Stripe payment processing error:");
+    console.error("   Message:", err.message);
+    console.error("   Stack:", err.stack);
+    
+    res.status(500).json({ 
+      success: false,
+      message: "Server error processing payment",
+      details: err.message
+    });
+  }
+});
+
+
 module.exports = router;
