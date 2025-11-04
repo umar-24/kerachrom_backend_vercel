@@ -820,6 +820,126 @@ authRouter.post("/api/signin", async (req, res) => {
 });
 
 // ✅ UPDATE USER (email/fields)
+// authRouter.put("/api/user/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     const {
+//       firstName,
+//       lastName,
+//       email,
+//       password,
+//       accountType,
+//       isResellerUser,
+//       businessUserId,
+//       isCompany,
+//       companyId,
+//       isEnabled,
+//       status: newStatus,
+//       address,
+//       city,
+//       telephone,
+//       state,
+//       country,
+//       // optional guard: currentPassword (agar aap enforce karna chahen)
+//       currentPassword,
+//     } = req.body;
+
+//     let user = await User.findById(id);
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const oldStatus = user.status;
+
+//     if (email && email !== user.email) {
+//       // (Optional) Enforce current password if email change is sensitive
+//       if (currentPassword) {
+//         const ok = await bcrypt.compare(currentPassword, user.password);
+//         if (!ok) return res.status(401).json({ message: "Wrong password" });
+//       }
+
+//       const emailExists = await User.findOne({ email });
+//       if (emailExists) {
+//         return res.status(400).json({ message: "Email already in use" });
+//       }
+//     }
+
+//     let hashedPassword = user.password;
+//     if (password && password.length >= 8) {
+//       const salt = await bcrypt.genSalt(10);
+//       hashedPassword = await bcrypt.hash(password, salt);
+//     } else if (password) {
+//       return res.status(400).json({
+//         message: "Password must be at least 8 characters",
+//       });
+//     }
+
+//     if (
+//       accountType &&
+//       !["Personal", "Business", "admin"].includes(accountType)
+//     ) {
+//       return res.status(400).json({ message: "Invalid account type" });
+//     }
+
+//     if (isCompany && !businessUserId) {
+//       return res.status(400).json({
+//         message: "businessUserId is required for companies",
+//       });
+//     }
+
+//     if (isResellerUser && !companyId) {
+//       return res.status(400).json({
+//         message: "companyId is required for reseller users",
+//       });
+//     }
+
+//     const updatedUser = await User.findByIdAndUpdate(
+//       id,
+//       {
+//         firstName,
+//         lastName,
+//         email,
+//         password: hashedPassword,
+//         accountType,
+//         isResellerUser,
+//         businessUserId: isCompany
+//           ? businessUserId
+//           : isResellerUser
+//           ? companyId
+//           : null,
+//         isCompany,
+//         companyId: isResellerUser ? companyId : null,
+//         isEnabled,
+//         status: newStatus,
+//         address,
+//         city,
+//         telephone,
+//         state,
+//         country,
+//       },
+//       { new: true, select: "-password" }
+//     );
+
+//     if (oldStatus === "0" && newStatus === "1") {
+//       try {
+//         await sendEmail({
+//           to: updatedUser.email,
+//           subject: "Account Approved",
+//           html: `<p>Hello ${updatedUser.firstName},</p><p>Your account has been approved. You may now access the platform.</p>`,
+//         });
+//       } catch (emailErr) {
+//         console.error("❌ Error sending approval email:", emailErr);
+//       }
+//     }
+
+//     res.json({ message: "User updated successfully", user: updatedUser });
+//   } catch (error) {
+//     console.error("🔥 Update User Error:", error);
+//     res
+//       .status(500)
+//       .json({ message: "Error updating user", error: error.message });
+//   }
+// });
+
 authRouter.put("/api/user/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -841,8 +961,10 @@ authRouter.put("/api/user/:id", async (req, res) => {
       telephone,
       state,
       country,
-      // optional guard: currentPassword (agar aap enforce karna chahen)
       currentPassword,
+
+      // 👇 NEW
+      credits,
     } = req.body;
 
     let user = await User.findById(id);
@@ -851,12 +973,10 @@ authRouter.put("/api/user/:id", async (req, res) => {
     const oldStatus = user.status;
 
     if (email && email !== user.email) {
-      // (Optional) Enforce current password if email change is sensitive
       if (currentPassword) {
         const ok = await bcrypt.compare(currentPassword, user.password);
         if (!ok) return res.status(401).json({ message: "Wrong password" });
       }
-
       const emailExists = await User.findOne({ email });
       if (emailExists) {
         return res.status(400).json({ message: "Email already in use" });
@@ -868,54 +988,69 @@ authRouter.put("/api/user/:id", async (req, res) => {
       const salt = await bcrypt.genSalt(10);
       hashedPassword = await bcrypt.hash(password, salt);
     } else if (password) {
-      return res.status(400).json({
-        message: "Password must be at least 8 characters",
-      });
+      return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
 
-    if (
-      accountType &&
-      !["Personal", "Business", "admin"].includes(accountType)
-    ) {
+    if (accountType && !["Personal", "Business", "admin"].includes(accountType)) {
       return res.status(400).json({ message: "Invalid account type" });
     }
 
     if (isCompany && !businessUserId) {
-      return res.status(400).json({
-        message: "businessUserId is required for companies",
-      });
+      return res.status(400).json({ message: "businessUserId is required for companies" });
     }
 
     if (isResellerUser && !companyId) {
-      return res.status(400).json({
-        message: "companyId is required for reseller users",
-      });
+      return res.status(400).json({ message: "companyId is required for reseller users" });
     }
+
+    // ✅ Build $set only with provided fields (avoid overwriting with undefined)
+    const $set = {};
+    if (typeof firstName !== "undefined") $set.firstName = firstName;
+    if (typeof lastName !== "undefined")  $set.lastName = lastName;
+    if (typeof email !== "undefined")     $set.email = email;
+    if (typeof hashedPassword !== "undefined") $set.password = hashedPassword;
+    if (typeof accountType !== "undefined")    $set.accountType = accountType;
+    if (typeof isResellerUser !== "undefined") $set.isResellerUser = isResellerUser;
+    if (typeof isCompany !== "undefined")      $set.isCompany = isCompany;
+    if (typeof isEnabled !== "undefined")      $set.isEnabled = isEnabled;
+    if (typeof newStatus !== "undefined")      $set.status = newStatus;
+    if (typeof address !== "undefined")        $set.address = address;
+    if (typeof city !== "undefined")           $set.city = city;
+    if (typeof telephone !== "undefined")      $set.telephone = telephone;
+    if (typeof state !== "undefined")          $set.state = state;
+    if (typeof country !== "undefined")        $set.country = country;
+
+    // Relationship fields
+    if (typeof isCompany !== "undefined" || typeof isResellerUser !== "undefined" ||
+        typeof businessUserId !== "undefined" || typeof companyId !== "undefined") {
+      if (isCompany) {
+        $set.businessUserId = businessUserId ?? user.businessUserId;
+        $set.companyId = null;
+      } else if (isResellerUser) {
+        $set.businessUserId = businessUserId ?? user.businessUserId;
+        $set.companyId = companyId ?? user.companyId;
+      } else {
+        // plain Personal/Business (non-company, non-reseller)
+        if (typeof businessUserId !== "undefined") $set.businessUserId = businessUserId;
+        if (typeof companyId !== "undefined")      $set.companyId = companyId;
+      }
+    }
+
+    // 👇 NEW: exact credits set (if provided)
+    if (typeof credits !== "undefined") {
+      const n = Number(credits);
+      if (Number.isNaN(n)) {
+        return res.status(400).json({ message: "credits must be a number" });
+      }
+      $set.credits = n;
+    }
+
+    // Helpful logs
+    console.log("PUT /api/user/:id $set =>", $set);
 
     const updatedUser = await User.findByIdAndUpdate(
       id,
-      {
-        firstName,
-        lastName,
-        email,
-        password: hashedPassword,
-        accountType,
-        isResellerUser,
-        businessUserId: isCompany
-          ? businessUserId
-          : isResellerUser
-          ? companyId
-          : null,
-        isCompany,
-        companyId: isResellerUser ? companyId : null,
-        isEnabled,
-        status: newStatus,
-        address,
-        city,
-        telephone,
-        state,
-        country,
-      },
+      { $set },
       { new: true, select: "-password" }
     );
 
@@ -934,11 +1069,10 @@ authRouter.put("/api/user/:id", async (req, res) => {
     res.json({ message: "User updated successfully", user: updatedUser });
   } catch (error) {
     console.error("🔥 Update User Error:", error);
-    res
-      .status(500)
-      .json({ message: "Error updating user", error: error.message });
+    res.status(500).json({ message: "Error updating user", error: error.message });
   }
 });
+
 
 // ✅ FORGOT / OTP / RESET (as-is)
 authRouter.post("/api/forgot-password", async (req, res) => {
