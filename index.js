@@ -82,8 +82,9 @@ const categoryRoutes = require("./routes/bg_catg");
 const creditRoutes = require("./routes/credits");
 const router = require("./routes/pdf_mail");
 const paypalRoutes = require("./routes/paypal");
-const userRoutes = require("./routes/user.routes");
-app.use("/api", userRoutes);
+
+
+
 
 // CORS package
 const cors = require("cors");
